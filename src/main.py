@@ -80,7 +80,7 @@ if __name__ == "__main__":
         filename_base = f"gd_9best"
         path = "../results"
         best_leader_val = float("inf")
-        jobs = [executor.submit(gd_algorithm, func) for _ in range(100)]
+        jobs = [executor.submit(cls_evolution, func) for _ in range(100)]
         results = []
         for job in tqdm(jobs):
             result, leader = job.result()
