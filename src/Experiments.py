@@ -1,0 +1,25 @@
+expr = {
+    'cls_1rmeb': "RMEB s=1e-4",
+    'cls_1rmew': "RMEW s=0.5",
+    'cls_1tueb': "TUEB s=0.5",
+    'cls_1tuew': "TUEW s=1e-4",
+    "cls_1tnn": "TNN s=0.5",
+    'cls_9rmeb': "RMEB s=1e-4",
+    'cls_9tunb': "TUNB s=0.5",
+    'cls_9tueb': "TUEB s=2.5",
+    'cls_9tuew': "TUEW s=7.0",
+    'se_1mpb': "MPB",
+    'se_1upb': "UPB",
+    'se_1ucb': "UCB",
+    'se_1mcb': "MCB",
+    'se_1mcs': "MCS",
+    'se_9mpb': "MPB",
+    'se_9upb': "UPB",
+    'se_9ucb': "UCB",
+    'se_9mcb': "MCB",
+    'se_9mcs': "MCS",
+    'gd_1best': "gradient descent(backtrack) β=2.5",
+    'gd_9best': "gradient descent(backtrack) β=2.5",
+
+}
+
