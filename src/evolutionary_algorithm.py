@@ -1,90 +1,125 @@
-from typing import Callable
+import random
+from typing import Callable, TypeAlias
+from collections import namedtuple
+from functools import partial
 
 import numpy as np
-from collections import namedtuple
 
-Entity = namedtuple("Entity", "x value")
-DataPoint = namedtuple("DataPoint", "t population")
+Specimen = namedtuple("Specimen", "x score")
 
-
-def stop_condition(t, **kwargs):
-    return t >= kwargs['t_max']
+Population: TypeAlias = list[Specimen]
 
 
-def tournament_reproduction(population: np.array, scores: np.array) -> np.array:
+def tournament_reproduction(population: Population) -> Population:
     new_population = []
 
     for _ in range(len(population)):
-        specimen1_idx, specimen2_idx = np.random.randint(0, len(population), size=2)
-        winner_idx = specimen1_idx if scores[specimen1_idx] < scores[specimen2_idx] else specimen2_idx
-        new_population.append(np.copy(population[winner_idx]))
+        tournament = random.choices(population, k=2)
+        new_population.append(min(tournament, key=lambda specimen: specimen.score))
 
-    return np.array(new_population)
-
-
-def elite_selection(
-        mutants: np.array,
-        mutant_scores: np.array,
-        old_population: np.array,
-        old_population_scores: np.array,
-        elite_size: int,
-) -> tuple[np.array, np.array]:
-    population_size = len(old_population)
-
-    elite = sorted([
-        (old_population_scores[i], old_population[i]) for i in range(population_size)
-    ])[:elite_size]
-
-    combined_population = [(mutant_scores[i], mutants[i]) for i in range(population_size)] + elite
-    combined_population = sorted(combined_population)[:population_size]
-
-    population = [x[1] for x in combined_population]
-    scores = [x[0] for x in combined_population]
-
-    return np.array(population), np.array(scores)
+    return new_population
 
 
-def mutate(population: np.array, mutation_strength: float):
+def mutate(f: Callable, population: Population, mutation_strength: float) -> Population:
     mutants = []
-    for x in population:
-        x = x + mutation_strength * np.random.normal(len(population[0]))
-        mutants.append(x)
+    for specimen in population:
+        new_x = np.array(specimen.x) + mutation_strength * np.random.normal(size=len(population[0].x))
+        mutants.append(Specimen(list(new_x), f(new_x)))
     return mutants
 
 
+def random_selection(old_population: Population, mutants: Population) -> Population:
+    combined_population = old_population + mutants
+
+    return random.choices(combined_population, k=len(old_population))
+
+
+def fitness_proportionate_selection(old_population: Population, mutants: Population) -> Population:
+    combined_population = old_population + mutants
+
+    combined_population2 = [Specimen(s.x, s.score + 1000) for s in combined_population]
+    sum_of_scores = sum(specimen.score for specimen in combined_population2)
+
+    choices = random.choices(
+        range(len(combined_population)),
+        k=len(old_population),
+        weights=[specimen.score / sum_of_scores for specimen in combined_population2]
+    )
+
+    return [combined_population[i] for i in choices]
+
+
+def elite_selection(
+        old_population: Population,
+        mutants: Population,
+        elite_size: int,
+) -> Population:
+    elite = sorted(old_population, key=lambda specimen: specimen.score)[:elite_size]
+    combined_population = sorted(mutants + elite, key=lambda specimen: specimen.score)
+
+    return combined_population[:len(old_population)]
+
+
+def density_selection(
+        old_population: Population,
+        mutants: Population,
+) -> Population:
+    combined_population = old_population + mutants
+
+    while len(combined_population) > len(mutants):
+        specimen1_idx, specimen2_idx = _find_two_nearest_specimens(combined_population)
+        combined_population.pop(random.choice([specimen1_idx, specimen2_idx]))
+
+    return list(combined_population)
+
+
+def _find_two_nearest_specimens(population: Population) -> tuple[Specimen, Specimen]:
+    nearest_specimen = [0, 1]
+    min_dist = float("inf")
+
+    for i, specimen1 in enumerate(population):
+        for j, specimen2 in enumerate(population):
+            if i == j:
+                continue
+
+            dist = np.linalg.norm(np.array(specimen1.x) - np.array(specimen2.x))
+            if dist < min_dist:
+                min_dist = dist
+                nearest_specimen = [i, j]
+
+    return nearest_specimen
+
+
 def classic_evolution(
-        f: Callable[[np.array], float],
-        init_population: np.array,
+        f: Callable[[list[float]], float],
+        population: Population,
         t_max: int,
         mutation_strength: float,
-        elite_size: int
-) -> tuple[np.array, float]:
-    evaluate_population_scores = lambda p: [f(a) for a in p]
-    population = init_population
-    population_scores = evaluate_population_scores(population)
-
-    best_specimen_idx = np.argmin(population_scores)
-    best_specimen = np.copy(population[best_specimen_idx])
-    best_specimen_score = population_scores[best_specimen_idx]
+        selection_strategy: Callable[[Population, Population], Population],
+) -> Specimen:
+    best_specimen = min(population, key=lambda specimen: specimen.score)
 
     for t in range(t_max):
-        newborns = tournament_reproduction(population, population_scores)
-        mutants = mutate(newborns, mutation_strength)
+        newborns = tournament_reproduction(population)
+        mutants = mutate(f, newborns, mutation_strength)
 
-        mutants_scores = evaluate_population_scores(mutants)
-        candidate_idx = np.argmin(mutants_scores)
+        candidate = min(mutants, key=lambda specimen: specimen.score)
 
-        if mutants_scores[candidate_idx] <= best_specimen_score:
-            best_specimen = mutants[candidate_idx]
+        if candidate.score <= best_specimen.score:
+            best_specimen = candidate
 
-        population, population_scores = elite_selection(mutants, mutants_scores, population, population_scores, elite_size)
+        population = selection_strategy(population, mutants)
 
-    return best_specimen, best_specimen_score
+    return best_specimen
 
 
 if __name__ == "__main__":
-    f = lambda x: 14 * x[0]**4 + 12*x[0]**3 - 41*x[0]**2- 9*x[0] + 20
-    init_pop = (100 + 100) * np.random.sample(20) - 100
-    init_pop = [[a] for a in init_pop]
+    ff = lambda x: 14 * x[0]**4 + 12*x[0]**3 - 41*x[0]**2- 9*x[0] + 20
 
-    print(classic_evolution(f, init_pop, 1000, 0.5, 1))
+    init_pop = (250 + 250) * np.random.sample((20, 1)) - 250
+    init_pop = [Specimen(list(a), ff(a)) for a in init_pop]
+
+    print("Random: ", classic_evolution(ff, init_pop, 100, 0.5, random_selection))
+    print("Proportional: ", classic_evolution(ff, init_pop, 100, 0.5, fitness_proportionate_selection))
+    print("Elite: ", classic_evolution(ff, init_pop, 100, 0.5, partial(elite_selection, elite_size=1)))
+    print("Density: ", classic_evolution(ff, init_pop, 100, 0.5, density_selection))
