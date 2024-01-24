@@ -3,3 +3,4 @@ src/cec2017/__pycache__/
 env/
 venv/
 .idea/
+data/
