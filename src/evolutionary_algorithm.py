@@ -1,7 +1,6 @@
 import random
 from typing import Callable, TypeAlias
 from collections import namedtuple
-from functools import partial
 
 import numpy as np
 
@@ -9,8 +8,10 @@ Specimen = namedtuple("Specimen", "x score")
 
 Population: TypeAlias = list[Specimen]
 
+Log: TypeAlias = list[Population]
 
-def tournament_reproduction(population: Population) -> Population:
+
+def _tournament_reproduction(population: Population) -> Population:
     new_population = []
 
     for _ in range(len(population)):
@@ -20,11 +21,23 @@ def tournament_reproduction(population: Population) -> Population:
     return new_population
 
 
-def mutate(f: Callable, population: Population, mutation_strength: float) -> Population:
+def _mutate(
+        func: Callable,
+        population: Population,
+        mutation_strength: float,
+        bounds: tuple[float, float],
+) -> Population:
     mutants = []
     for specimen in population:
-        new_x = np.array(specimen.x) + mutation_strength * np.random.normal(size=len(population[0].x))
-        mutants.append(Specimen(list(new_x), f(new_x)))
+        new_x = list(np.array(specimen.x) + mutation_strength * np.random.normal(size=len(population[0].x)))
+
+        for i in range(len(new_x)):
+            if new_x[i] < bounds[0]:
+                new_x[i] = bounds[0]
+            if new_x[i] > bounds[1]:
+                new_x[i] = bounds[1]
+
+        mutants.append(Specimen(new_x, func(new_x)))
     return mutants
 
 
@@ -37,13 +50,10 @@ def random_selection(old_population: Population, mutants: Population) -> Populat
 def fitness_proportionate_selection(old_population: Population, mutants: Population) -> Population:
     combined_population = old_population + mutants
 
-    combined_population2 = [Specimen(s.x, s.score + 1000) for s in combined_population]
-    sum_of_scores = sum(specimen.score for specimen in combined_population2)
-
     choices = random.choices(
         range(len(combined_population)),
         k=len(old_population),
-        weights=[specimen.score / sum_of_scores for specimen in combined_population2]
+        weights=[1 / abs(specimen.score) for specimen in combined_population]
     )
 
     return [combined_population[i] for i in choices]
@@ -60,48 +70,63 @@ def elite_selection(
     return combined_population[:len(old_population)]
 
 
+def generation_selection(old_population: Population, mutants: Population) -> Population:
+    return mutants
+
+
 def density_selection(
         old_population: Population,
         mutants: Population,
 ) -> Population:
     combined_population = old_population + mutants
 
-    while len(combined_population) > len(mutants):
-        specimen1_idx, specimen2_idx = _find_two_nearest_specimens(combined_population)
-        combined_population.pop(random.choice([specimen1_idx, specimen2_idx]))
-
-    return list(combined_population)
-
-
-def _find_two_nearest_specimens(population: Population) -> tuple[Specimen, Specimen]:
-    nearest_specimen = [0, 1]
-    min_dist = float("inf")
-
-    for i, specimen1 in enumerate(population):
-        for j, specimen2 in enumerate(population):
-            if i == j:
-                continue
+    distances = []
+    for i in range(len(combined_population)):
+        for j in range(i+1, len(combined_population)):
+            specimen1 = combined_population[i]
+            specimen2 = combined_population[j]
 
             dist = np.linalg.norm(np.array(specimen1.x) - np.array(specimen2.x))
-            if dist < min_dist:
-                min_dist = dist
-                nearest_specimen = [i, j]
+            distances.append((dist, i, j))
 
-    return nearest_specimen
+    distances.sort(reverse=True)
+
+    indicies_to_pop = set()
+
+    while len(indicies_to_pop) < len(mutants):
+        _, specimen1_idx, specimen2_idx = distances.pop()
+        indicies_to_pop.add(random.choice([specimen1_idx, specimen2_idx]))
+
+    new_population = [
+        combined_population[i] for i in range(len(combined_population))
+        if i not in indicies_to_pop
+    ]
+
+    return new_population
+
+
+def _initialize_population(func: Callable, population_size: int, bounds: tuple[float, float], dim: int) -> Population:
+    init_pop = [list(np.random.uniform(bounds[0], bounds[1], dim)) for _ in range(population_size)]
+    return [Specimen(x, func(x)) for x in init_pop]
 
 
 def classic_evolution(
-        f: Callable[[list[float]], float],
-        population: Population,
+        func: Callable[[list[float]], float],
+        population_size: int,
+        dimensions: int,
+        bounds: tuple[float, float],
         t_max: int,
         mutation_strength: float,
         selection_strategy: Callable[[Population, Population], Population],
-) -> Specimen:
+) -> tuple[Specimen, Log]:
+    log = []
+    population = _initialize_population(func, population_size, bounds, dimensions)
     best_specimen = min(population, key=lambda specimen: specimen.score)
 
     for t in range(t_max):
-        newborns = tournament_reproduction(population)
-        mutants = mutate(f, newborns, mutation_strength)
+        log.append(population)
+        newborns = _tournament_reproduction(population)
+        mutants = _mutate(func, newborns, mutation_strength, bounds)
 
         candidate = min(mutants, key=lambda specimen: specimen.score)
 
@@ -110,16 +135,4 @@ def classic_evolution(
 
         population = selection_strategy(population, mutants)
 
-    return best_specimen
-
-
-if __name__ == "__main__":
-    ff = lambda x: 14 * x[0]**4 + 12*x[0]**3 - 41*x[0]**2- 9*x[0] + 20
-
-    init_pop = (250 + 250) * np.random.sample((20, 1)) - 250
-    init_pop = [Specimen(list(a), ff(a)) for a in init_pop]
-
-    print("Random: ", classic_evolution(ff, init_pop, 100, 0.5, random_selection))
-    print("Proportional: ", classic_evolution(ff, init_pop, 100, 0.5, fitness_proportionate_selection))
-    print("Elite: ", classic_evolution(ff, init_pop, 100, 0.5, partial(elite_selection, elite_size=1)))
-    print("Density: ", classic_evolution(ff, init_pop, 100, 0.5, density_selection))
+    return best_specimen, log
